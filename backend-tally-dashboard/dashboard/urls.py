@@ -16,9 +16,20 @@ Including another URLconf
 """
 from django.contrib import admin
 from django.urls import path, include
+from django.http import JsonResponse
+
+
+def health_check(request):
+    """Simple health check endpoint for monitoring"""
+    return JsonResponse({
+        'status': 'healthy',
+        'service': 'HRMS Backend',
+        'version': '1.0'
+    })
 
 
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/', include('excel_data.urls')),  # Main HRMS API endpoints
+    path('health/', health_check, name='health_check'),  # Health check endpoint
 ]
