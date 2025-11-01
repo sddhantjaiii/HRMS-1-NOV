@@ -57,6 +57,8 @@ MIDDLEWARE = [
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'excel_data.middleware.tenant_middleware.TenantMiddleware',  # Custom tenant middleware
+    'excel_data.middleware.credit_check_middleware.AutoCreditDeductionMiddleware',  # Auto credit deduction on server wake
+    'excel_data.middleware.credit_check_middleware.CreditEnforcementMiddleware',  # Credit enforcement and warnings
     'excel_data.middleware.session_middleware.SingleSessionMiddleware',  # Single session enforcement
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',

@@ -28,6 +28,7 @@ class Tenant(models.Model):
     # Credit and Billing Information
     credits = models.PositiveIntegerField(default=0, help_text="Available credits for this tenant")
     is_active = models.BooleanField(default=True, help_text="Whether the tenant is active (has credits > 0 and is not manually deactivated)")
+    last_credit_deducted = models.DateField(null=True, blank=True, help_text="Date when the last credit was deducted (IST)")
     
     # Billing information (for future use)
     plan = models.CharField(max_length=50, default='free', choices=[
@@ -57,35 +58,69 @@ class Tenant(models.Model):
         return timezone.now().astimezone(ist)
         
     def deduct_daily_credit(self):
-        """Deduct 1 credit if it's a new day in IST and credits are available"""
+        """Deduct credits for all missed days since last deduction"""
         from excel_data.models.auth import CustomUser
+        from datetime import timedelta
         
         now_ist = self.get_ist_time()
-        last_updated_ist = self.updated_at.astimezone(pytz.timezone('Asia/Kolkata')) if self.updated_at else None
+        today_ist = now_ist.date()
         
-        should_deduct = (
-            last_updated_ist is None or 
-            last_updated_ist.date() < now_ist.date()
-        )
+        # Check if we've already deducted credit today
+        if self.last_credit_deducted and self.last_credit_deducted >= today_ist:
+            # Already deducted today
+            logger.debug(f"Tenant {self.name} (ID: {self.id}) - Credit already deducted today ({self.last_credit_deducted})")
+            return False
         
-        if should_deduct and self.credits > 0:
+        if self.credits > 0:
+            # Calculate number of days to deduct
+            if self.last_credit_deducted is None:
+                # First time deduction - only deduct 1 credit for today
+                days_to_deduct = 1
+            else:
+                # Calculate days between last deduction and today
+                days_diff = (today_ist - self.last_credit_deducted).days
+                days_to_deduct = days_diff  # Deduct for all missed days
+            
+            logger.info(
+                f"Tenant {self.name} (ID: {self.id}) - Attempting credit deduction. "
+                f"Last deducted: {self.last_credit_deducted}, Today: {today_ist}, "
+                f"Days to deduct: {days_to_deduct}"
+            )
+            
             with transaction.atomic():
                 # Use select_for_update to prevent race conditions
                 tenant = Tenant.objects.select_for_update().get(pk=self.pk)
-                if tenant.credits > 0:
-                    tenant.credits -= 1
+                
+                # Double-check after acquiring lock
+                if tenant.last_credit_deducted and tenant.last_credit_deducted >= today_ist:
+                    logger.debug(f"Tenant {tenant.name} (ID: {tenant.id}) - Race condition avoided, already deducted")
+                    return False
+                
+                if tenant.credits > 0 and days_to_deduct > 0:
+                    # Deduct credits (but don't go below 0)
+                    credits_to_deduct = min(days_to_deduct, tenant.credits)
+                    tenant.credits -= credits_to_deduct
+                    tenant.last_credit_deducted = today_ist
                     
                     # Deactivate tenant if no credits left
                     if tenant.credits == 0:
                         tenant.is_active = False
                         # Deactivate all users for this tenant
                         CustomUser.objects.filter(tenant=tenant).update(is_active=False)
-                        logger.info(f"Tenant {tenant.name} deactivated due to zero credits")
+                        logger.warning(
+                            f"🔴 Tenant {tenant.name} (ID: {tenant.id}) deactivated due to zero credits. "
+                            f"Deducted {credits_to_deduct} credits for {days_to_deduct} days"
+                        )
                     
-                    # Save will automatically update the updated_at field
-                    tenant.save(update_fields=['credits', 'is_active', 'updated_at'])
-                    logger.debug(f"Deducted 1 credit from tenant {tenant.name}. Remaining: {tenant.credits}")
+                    tenant.save(update_fields=['credits', 'is_active', 'last_credit_deducted'])
+                    logger.info(
+                        f"✅ Deducted {credits_to_deduct} credit(s) from tenant {tenant.name} (ID: {tenant.id}) "
+                        f"for {days_to_deduct} day(s). Remaining: {tenant.credits}"
+                    )
                     return True
+        else:
+            logger.debug(f"Tenant {self.name} (ID: {self.id}) - No credits available to deduct")
+        
         return False
     
     def add_credits(self, amount):
