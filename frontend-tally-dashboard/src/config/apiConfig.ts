@@ -9,8 +9,8 @@ export const API_CONFIG = {
 
     // Priority 2: Production on Vercel (*.vercel.app)
     if (window.location.hostname.includes('vercel.app')) {
-      // Replace with your Railway backend URL
-      return 'https://your-project.railway.app';
+      // Replace with your Railway backend URL after deployment
+      return 'https://hrms1-latest-production.up.railway.app'; // Update this with your actual Railway URL
     }
 
     // Priority 3: Legacy production server
